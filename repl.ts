@@ -1,7 +1,7 @@
 // repl.ts
 import * as colors from "jsr:@std/fmt/colors";
 import { Input, type InputOptions } from "https://deno.land/x/cliffy@v1.0.0-rc.4/prompt/mod.ts";
-import { addModuleToMap } from "./module_map.ts";
+import { addModuleToSessionMap, prepareSpecifierForImport, type DenoImportMap } from "./module_map.ts";
 // import { readAll } from "jsr:@std/io/read-all"; // No longer needed here if main.ts handles it
 
 declare global {
@@ -9,6 +9,8 @@ declare global {
   var _input: unknown;
   // deno-lint-ignore no-var
   var _imports: Record<string, unknown>;
+  // deno-lint-ignore no-var
+  var _activeImportMap: DenoImportMap | undefined;
 }
 
 let ttyPromptReader: (Deno.Reader & Deno.Closer & Deno.WriterSync) | undefined = undefined;
@@ -62,8 +64,13 @@ Available REPL commands (executed immediately):
   .run                 Execute the current code buffer.
   .do <filepath>       Execute a JavaScript file. Example: .do ./myscript.js
                        (File content is NOT added to buffer history)
-  .import <name> <url>  Dynamically import a module and add it to the persistent map.
-                         Example: .import myMod https://deno.land/std/fs/mod.ts
+  .import <name> <specifier>  Dynamically import a module and add it to the persistent map.
+                         <specifier> can be a full URL, a JSR specifier (e.g., jsr:@std/fs, @std/path),
+                         an NPM specifier (e.g., npm:zod), or a bare specifier
+                         resolvable through an active import map (loaded via the
+                         --import-map CLI option or a detected deno.json/deno.jsonc).
+                         Example: .import fs @std/fs
+                         Example: .import zod npm:zod
   .clear               Clear the terminal screen.
   .context             Show current _input and _imports keys.
 
@@ -82,6 +89,19 @@ Global objects:
   globalThis._input:   Data piped from stdin (if provided by caller).
   globalThis._imports: Object holding auto-imported modules. You can inspect its
                        keys to see what's available (e.g., using .context).
+
+Module Resolution Note:
+  Module specifiers for .import and dx module add (from CLI) can be resolved
+  using an import map. This map can be provided via the --import-map CLI flag
+  or automatically detected from a deno.json or deno.jsonc file in the
+  directory where dx was launched.
+
+  Standard import statements within your REPL code (e.g., import foo from "bar";)
+  are handled directly by Deno's runtime. If dx itself was launched with Deno's
+  native --import-map flag (e.g., deno run --import-map=my_deno_map.json main.ts),
+  Deno's runtime will use that for such import statements. The dx managed map
+  (via --import-map or deno.json/c) is primarily for the .import command and
+  dx module add convenience.
 `;
     outputToReplConsole(helpMessage);
   },
@@ -244,49 +264,53 @@ Global objects:
   },
   ".import": async (args?: string) => {
     if (!args) {
-      outputToReplConsole(colors.red("Usage: .import <name> <url>"));
+      outputToReplConsole(colors.red("Usage: .import <name> <specifier>"));
       return;
     }
     const parts = args.trim().split(/\s+/);
     if (parts.length !== 2) {
-      outputToReplConsole(colors.red("Usage: .import <name> <url>"));
-      outputToReplConsole(colors.gray("Example: .import path https://deno.land/std/path/mod.ts"));
+      outputToReplConsole(colors.red("Usage: .import <name> <specifier>"));
+      outputToReplConsole(colors.gray("Example: .import stdFs https://deno.land/std/fs/mod.ts"));
+      outputToReplConsole(colors.gray("Example: .import myLib ./my_local_lib.ts"));
+      outputToReplConsole(colors.gray("Example (with import map): .import myMappedLib mapped_key"));
       return;
     }
-    const [name, url] = parts;
+    const [name, specifierString] = parts;
     try {
-      // Validate name format (simple check: should be a valid JS identifier)
+      // Validate name format
       if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
         outputToReplConsole(colors.red(`Invalid module name: '${name}'. Must be a valid JavaScript identifier.`));
         return;
       }
-      // Validate URL format (simple check)
-      try {
-        new URL(url);
-      } catch (_) {
-        outputToReplConsole(colors.red(`Invalid URL format: '${url}'.`));
-        return;
-      }
 
-      outputToReplConsole(colors.dim(colors.italic(`Attempting to import module '${name}' from '${url}'...`)));
-      const module = await import(url);
+      outputToReplConsole(colors.dim(colors.italic(`Attempting to resolve and import module '${name}' from specifier '${specifierString}'...`)));
+
+      const preparedSpecifier = await prepareSpecifierForImport(specifierString, globalThis._activeImportMap);
+      outputToReplConsole(colors.dim(colors.italic(`Resolved specifier to: '${preparedSpecifier}'`)));
+
+      const module = await import(preparedSpecifier);
+
       if (typeof globalThis._imports === 'undefined') {
         globalThis._imports = {};
       }
       globalThis._imports[name] = module;
-      await addModuleToMap({ name, url });
-      outputToReplConsole(colors.green(`Module '${name}' from '${url}' imported and added to map.`));
-      outputToReplConsole(colors.gray(`You can now use '${name}' in your code.`));
+
+      // セッション用マップに追加（永続化しない）
+      await addModuleToSessionMap({ name, specifier: specifierString }, globalThis._activeImportMap);
+
+      outputToReplConsole(colors.green(`Module '${name}' (from original specifier '${specifierString}', resolved to '${preparedSpecifier}') imported for this session.`));
+      outputToReplConsole(colors.gray(`You can now use '${name}' in your code. This module will not persist after the REPL session ends.`));
 
     } catch (error) {
-      outputToReplConsole(colors.red(`Error importing module '${name}' from '${url}':`));
+      outputToReplConsole(colors.red(`Error processing module '${name}' with specifier '${specifierString}':`));
       if (error instanceof Error) {
-        outputToReplConsole(colors.red(error.message));
-        // More detailed error logging for common cases
-        if (error.message.includes("net::ERR_MODULE_NOT_FOUND") || error.message.includes("Import meta")) {
-            outputToReplConsole(colors.yellow("Hint: Check if the URL is correct and the module exists."));
-        } else if (error.message.includes("relative import path") && !url.startsWith("http")) {
-            outputToReplConsole(colors.yellow("Hint: For local files, ensure the path is correct and Deno has read access (--allow-read). Relative paths are resolved from the current working directory."));
+        outputToReplConsole(colors.red(`${error.name}: ${error.message}`));
+        if (error.message.includes("Unable to resolve specifier")) {
+             outputToReplConsole(colors.yellow("Hint: The specifier was not a valid URL, a recognized scheme (jsr:, npm:), or a key in the active import map resolving to one."));
+        } else if (error.message.includes("net::ERR_MODULE_NOT_FOUND") || error.message.includes("Cannot find module")) {
+            outputToReplConsole(colors.yellow("Hint: Check if the resolved specifier is correct and the module exists at that location."));
+        } else if (error.message.includes("relative import path") && !specifierString.startsWith("http") && !specifierString.startsWith("jsr:") && !specifierString.startsWith("npm:")) {
+            outputToReplConsole(colors.yellow("Hint: For local files, ensure the path is correct and Deno has read access (--allow-read). Relative paths are resolved from the current working directory if not handled by an import map."));
         }
       } else {
         outputToReplConsole(colors.red(String(error)));
