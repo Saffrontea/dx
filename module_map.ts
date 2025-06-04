@@ -15,7 +15,8 @@ export interface ModuleMapEntry {
 export type ModuleMap = Record<string, ModuleMapEntry>;
 
 import { ensureDirSync } from "jsr:@std/fs/ensure-dir";
-import * as path from "jsr:@std/path/mod.ts";
+import * as path from "jsr:@std/path";
+
 
 const homeDir = Deno.env.get("HOME") || Deno.env.get("USERPROFILE") || ".";
 const configDir = path.join(homeDir, ".config", "dx");
