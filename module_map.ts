@@ -1,5 +1,7 @@
 // module_map.ts
 
+export type DenoImportMap = { imports: Record<string, string> };
+
 /**
  * Interface for a module map entry.
  */
@@ -73,17 +75,19 @@ export async function saveModuleMap(map: ModuleMap): Promise<void> {
 
 /**
  * Adds a module to the map and saves the map.
- * @param entry The ModuleMapEntry to add.
+ * @param entry The object containing name and specifier of the module.
+ * @param activeImportMap Optional Deno import map to resolve specifier.
  * @returns A Promise that resolves when the module is added and the map is saved.
  */
-export async function addModuleToMap(entry: ModuleMapEntry): Promise<void> {
+export async function addModuleToMap(entry: { name: string; specifier: string; }, activeImportMap?: DenoImportMap): Promise<void> {
   const currentMap = await loadModuleMap();
   if (currentMap[entry.name]) {
     // Potentially warn or throw if module name already exists,
     // for now, it will overwrite.
     console.warn(`Module name "${entry.name}" already exists in the map. Overwriting.`);
   }
-  currentMap[entry.name] = entry;
+  const resolvedSpecifier = await prepareSpecifierForImport(entry.specifier, activeImportMap);
+  currentMap[entry.name] = { name: entry.name, url: resolvedSpecifier };
   await saveModuleMap(currentMap);
 }
 
@@ -113,3 +117,28 @@ export async function listModulesInMap(): Promise<ModuleMap> {
 }
 
 // Final placeholder comment can be removed now or left if more functions are expected later.
+
+export async function prepareSpecifierForImport(specifier: string, activeImportMap?: DenoImportMap): Promise<string> {
+  const originalSpecifier = specifier; // Store original specifier for error message
+
+  if (activeImportMap && activeImportMap.imports && activeImportMap.imports[specifier]) {
+    specifier = activeImportMap.imports[specifier];
+  }
+
+  try {
+    new URL(specifier);
+    return specifier; // It's a full URL
+  } catch {
+    // Not a URL, continue processing
+  }
+
+  if (specifier.startsWith("@std/")) {
+    specifier = `jsr:${specifier}`;
+  }
+
+  if (specifier.startsWith("jsr:") || specifier.startsWith("npm:")) {
+    return specifier;
+  }
+
+  throw new Error(`Unable to resolve specifier: ${originalSpecifier}. It's not a valid URL, recognized scheme (jsr:, npm:), or a key in the provided import map resolving to one.`);
+}

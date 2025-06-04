@@ -1,6 +1,8 @@
 // main.ts
 import * as colors from "jsr:@std/fmt/colors";
 import { parseArgs } from "jsr:@std/cli/parse-args";
+import * as fs from "jsr:@std/fs"; // Using fs.exists
+import * as path from "jsr:@std/path";
 import { loadInitialData } from "./input.ts";
 import { startRepl,evaluateCode } from "./repl.ts";
 import {
@@ -9,6 +11,7 @@ import {
   listModulesInMap,
   loadModuleMap, // Added import
   type ModuleMapEntry,
+  type DenoImportMap,
 } from "./module_map.ts";
 // REPLからアクセス可能にするグローバル変数
 declare global {
@@ -16,6 +19,8 @@ declare global {
   var _input: unknown | null;
   // deno-lint-ignore no-var
   var _imports: Record<string, unknown>;
+  // deno-lint-ignore no-var
+  var _activeImportMap: DenoImportMap | undefined;
 }
 
 async function main() {
@@ -25,11 +30,70 @@ async function main() {
       'i': 'input'
     },
     boolean: ["help"],
-    string: ["i", "input","module"],
+    string: ["i", "input", "module", "import-map"],
     collect: ["module"], // Allows --module add name url, --module remove name etc.
                         // This is a bit of a workaround for subcommands with parseArgs.
                         // A more robust CLI parser might be better for complex subcommands.
   });
+
+  // --- Import Map Loading Logic ---
+  let activeImportMap: DenoImportMap | undefined = undefined;
+  const importMapPathArg = args["import-map"];
+
+  if (importMapPathArg) {
+    try {
+      if (await fs.exists(importMapPathArg, { isFile: true })) {
+        const fileContent = await Deno.readTextFile(importMapPathArg);
+        const parsedMap = JSON.parse(fileContent);
+        if (parsedMap && typeof parsedMap.imports === "object") {
+          activeImportMap = { imports: parsedMap.imports };
+          console.log(colors.dim(`Using import map from: ${importMapPathArg}`));
+        } else {
+          console.warn(colors.yellow(`Warning: Import map file ${importMapPathArg} does not have a valid 'imports' property. Proceeding without an import map.`));
+        }
+      } else {
+        console.warn(colors.yellow(`Warning: Import map file not found at ${importMapPathArg}. Proceeding without an import map.`));
+      }
+    } catch (error) {
+      console.warn(colors.yellow(`Warning: Error reading or parsing import map from ${importMapPathArg}: ${error.message}. Proceeding without an import map.`));
+    }
+  } else {
+    // Check for deno.json or deno.jsonc in the current directory
+    const denoJsonPath = path.join(Deno.cwd(), "deno.json");
+    const denoJsoncPath = path.join(Deno.cwd(), "deno.jsonc");
+
+    let foundDefaultImportMap = false;
+    if (await fs.exists(denoJsonPath, { isFile: true })) {
+      try {
+        const fileContent = await Deno.readTextFile(denoJsonPath);
+        const parsedMap = JSON.parse(fileContent);
+        if (parsedMap && typeof parsedMap.imports === "object") {
+          activeImportMap = { imports: parsedMap.imports };
+          foundDefaultImportMap = true;
+          console.log(colors.dim("Using import map from: deno.json"));
+        }
+      } catch (error) {
+        console.warn(colors.yellow(`Warning: Error reading or parsing deno.json: ${error.message}.`));
+      }
+    }
+
+    if (!foundDefaultImportMap && await fs.exists(denoJsoncPath, { isFile: true })) {
+      try {
+        // Basic JSONC handling: strip comments. For robust parsing, a dedicated library would be better.
+        const fileContent = await Deno.readTextFile(denoJsoncPath);
+        const jsonContent = fileContent.replace(/\/\*[\s\S]*?\*\/|\/\/.*/g, '');
+        const parsedMap = JSON.parse(jsonContent);
+        if (parsedMap && typeof parsedMap.imports === "object") {
+          activeImportMap = { imports: parsedMap.imports };
+          console.log(colors.dim("Using import map from: deno.jsonc"));
+        }
+      } catch (error) {
+        console.warn(colors.yellow(`Warning: Error reading or parsing deno.jsonc: ${error.message}.`));
+      }
+    }
+  }
+  // --- End Import Map Loading Logic ---
+
 
   if (args.help) {
     printHelp();
@@ -44,11 +108,11 @@ async function main() {
     switch (moduleCommand) {
       case "add":
         if (moduleArgs.length === 2) {
-          const [name, url] = moduleArgs;
-          await addModuleToMap({ name, url });
-          console.log(colors.green(`Module "${name}" (${url}) added to map.`));
+          const [name, url] = moduleArgs; // url here is the specifier from CLI
+          await addModuleToMap({ name, specifier: url }, activeImportMap);
+          console.log(colors.green(`Module "${name}" (specifier: ${url}) added to map.`));
         } else {
-          console.error(colors.red("Usage: dx module add <name> <url>"));
+          console.error(colors.red("Usage: dx module add <name> <specifier>"));
           Deno.exit(1);
         }
         break;
@@ -157,6 +221,8 @@ async function main() {
   // globalThis.Deno = Deno; // Deno は元々グローバル
   // globalThis.console = console; // console も元々グローバル
 
+  globalThis._activeImportMap = activeImportMap; // Make import map available to REPL
+
   if (globalThis._input !== null) {
     console.log(colors.gray("Input data loaded into `globalThis._input`."));
     if (typeof globalThis._input === 'string' && globalThis._input.length > 200) {
@@ -179,10 +245,16 @@ Usage:
   dx module <command>      Manage module mappings.
 
 Module Commands:
-  dx module add <name> <url>    Add a module mapping.
-                                Example: dx module add path_mod https://deno.land/std/path/mod.ts
+  dx module add <name> <specifier>    Add a module mapping.
+                                <specifier> can be a full URL, or a JSR specifier
+                                (e.g., jsr:@std/fs, @std/path), an NPM specifier
+                                (e.g., npm:zod), or a bare specifier resolvable
+                                through an active import map (via --import-map or
+                                deno.json/deno.jsonc).
+                                Example: dx module add fs @std/fs
+                                Example: dx module add zod npm:zod
   dx module remove <name>       Remove a module mapping.
-                                Example: dx module remove path_mod
+                                Example: dx module remove fs
   dx module list                List all module mappings.
 
 REPL Mode:
@@ -195,6 +267,11 @@ Options:
   -i, --input <filename>   Execute a JavaScript file, print its stdout, then exit.
                            Any data piped to dx via stdin will be available in the
                            script's globalThis._input variable.
+  --import-map <filepath>  Load a custom import map from the specified JSON file.
+                           This map is used to resolve module specifiers for
+                           `module add` and REPL's `.import` commands. If not
+                           provided, `dx` will look for a `deno.json` or
+                           `deno.jsonc` in the current directory.
 `);
 }
 
