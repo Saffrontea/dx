@@ -1,6 +1,7 @@
 // repl.ts
 import * as colors from "jsr:@std/fmt/colors";
 import { Input, type InputOptions } from "https://deno.land/x/cliffy@v1.0.0-rc.4/prompt/mod.ts";
+import { addModuleToMap } from "./module_map.ts";
 // import { readAll } from "jsr:@std/io/read-all"; // No longer needed here if main.ts handles it
 
 declare global {
@@ -61,6 +62,8 @@ Available REPL commands (executed immediately):
   .run                 Execute the current code buffer.
   .do <filepath>       Execute a JavaScript file. Example: .do ./myscript.js
                        (File content is NOT added to buffer history)
+  .import <name> <url>  Dynamically import a module and add it to the persistent map.
+                         Example: .import myMod https://deno.land/std/fs/mod.ts
   .clear               Clear the terminal screen.
   .context             Show current _input and _imports keys.
 
@@ -238,6 +241,57 @@ Global objects:
     bufferHistoryPointer = -1;
     codeBuffer = []; 
     outputToReplConsole(colors.yellow("Executed buffer history cleared."));
+  },
+  ".import": async (args?: string) => {
+    if (!args) {
+      outputToReplConsole(colors.red("Usage: .import <name> <url>"));
+      return;
+    }
+    const parts = args.trim().split(/\s+/);
+    if (parts.length !== 2) {
+      outputToReplConsole(colors.red("Usage: .import <name> <url>"));
+      outputToReplConsole(colors.gray("Example: .import path https://deno.land/std/path/mod.ts"));
+      return;
+    }
+    const [name, url] = parts;
+    try {
+      // Validate name format (simple check: should be a valid JS identifier)
+      if (!/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+        outputToReplConsole(colors.red(`Invalid module name: '${name}'. Must be a valid JavaScript identifier.`));
+        return;
+      }
+      // Validate URL format (simple check)
+      try {
+        new URL(url);
+      } catch (_) {
+        outputToReplConsole(colors.red(`Invalid URL format: '${url}'.`));
+        return;
+      }
+
+      outputToReplConsole(colors.dim(colors.italic(`Attempting to import module '${name}' from '${url}'...`)));
+      const module = await import(url);
+      if (typeof globalThis._imports === 'undefined') {
+        globalThis._imports = {};
+      }
+      globalThis._imports[name] = module;
+      await addModuleToMap({ name, url });
+      outputToReplConsole(colors.green(`Module '${name}' from '${url}' imported and added to map.`));
+      outputToReplConsole(colors.gray(`You can now use '${name}' in your code.`));
+
+    } catch (error) {
+      outputToReplConsole(colors.red(`Error importing module '${name}' from '${url}':`));
+      if (error instanceof Error) {
+        outputToReplConsole(colors.red(error.message));
+        // More detailed error logging for common cases
+        if (error.message.includes("net::ERR_MODULE_NOT_FOUND") || error.message.includes("Import meta")) {
+            outputToReplConsole(colors.yellow("Hint: Check if the URL is correct and the module exists."));
+        } else if (error.message.includes("relative import path") && !url.startsWith("http")) {
+            outputToReplConsole(colors.yellow("Hint: For local files, ensure the path is correct and Deno has read access (--allow-read). Relative paths are resolved from the current working directory."));
+        }
+      } else {
+        outputToReplConsole(colors.red(String(error)));
+      }
+    }
   }
 };
 
