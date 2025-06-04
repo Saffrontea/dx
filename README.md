@@ -19,7 +19,7 @@
 
 ```bash
 # Install globally via Deno
-deno install -A -n dx https://raw.githubusercontent.com/Saffrontea/dx/main/main.ts
+deno install --global -A -n dx https://raw.githubusercontent.com/Saffrontea/dx/main/main.ts
 ```
 
 ## Quick Start
