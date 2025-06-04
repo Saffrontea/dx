@@ -253,7 +253,7 @@ function outputToReplConsole(message: string) {
     }
 }
 
-async function evaluateCode(code: string): Promise<void> {
+export async function evaluateCode(code: string): Promise<void> {
   if (code.trim() === "") return;
   try {
     const finalCode = `"use strict"; ${code}`;
