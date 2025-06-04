@@ -40,6 +40,10 @@ async function main() {
   let activeImportMap: DenoImportMap | undefined = undefined;
   const importMapPathArg = args["import-map"];
 
+  // Check for -i/--input option first
+  const inputFile = args.input || args.i;
+  const isInputMode = !!inputFile;
+
   if (importMapPathArg) {
     try {
       if (await fs.exists(importMapPathArg, { isFile: true })) {
@@ -47,15 +51,23 @@ async function main() {
         const parsedMap = JSON.parse(fileContent);
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
-          console.log(colors.dim(`Using import map from: ${importMapPathArg}`));
+          if (!isInputMode) {
+            console.log(colors.dim(`Using import map from: ${importMapPathArg}`));
+          }
         } else {
-          console.warn(colors.yellow(`Warning: Import map file ${importMapPathArg} does not have a valid 'imports' property. Proceeding without an import map.`));
+          if (!isInputMode) {
+            console.warn(colors.yellow(`Warning: Import map file ${importMapPathArg} does not have a valid 'imports' property. Proceeding without an import map.`));
+          }
         }
       } else {
-        console.warn(colors.yellow(`Warning: Import map file not found at ${importMapPathArg}. Proceeding without an import map.`));
+        if (!isInputMode) {
+          console.warn(colors.yellow(`Warning: Import map file not found at ${importMapPathArg}. Proceeding without an import map.`));
+        }
       }
     } catch (error) {
-      console.warn(colors.yellow(`Warning: Error reading or parsing import map from ${importMapPathArg}: ${error.message}. Proceeding without an import map.`));
+      if (!isInputMode) {
+        console.warn(colors.yellow(`Warning: Error reading or parsing import map from ${importMapPathArg}: ${error.message}. Proceeding without an import map.`));
+      }
     }
   } else {
     // Check for deno.json or deno.jsonc in the current directory
@@ -70,10 +82,14 @@ async function main() {
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
           foundDefaultImportMap = true;
-          console.log(colors.dim("Using import map from: deno.json"));
+          if (!isInputMode) {
+            console.log(colors.dim("Using import map from: deno.json"));
+          }
         }
       } catch (error) {
-        console.warn(colors.yellow(`Warning: Error reading or parsing deno.json: ${error.message}.`));
+        if (!isInputMode) {
+          console.warn(colors.yellow(`Warning: Error reading or parsing deno.json: ${error.message}.`));
+        }
       }
     }
 
@@ -85,10 +101,14 @@ async function main() {
         const parsedMap = JSON.parse(jsonContent);
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
-          console.log(colors.dim("Using import map from: deno.jsonc"));
+          if (!isInputMode) {
+            console.log(colors.dim("Using import map from: deno.jsonc"));
+          }
         }
       } catch (error) {
-        console.warn(colors.yellow(`Warning: Error reading or parsing deno.jsonc: ${error.message}.`));
+        if (!isInputMode) {
+          console.warn(colors.yellow(`Warning: Error reading or parsing deno.jsonc: ${error.message}.`));
+        }
       }
     }
   }
@@ -98,6 +118,41 @@ async function main() {
   if (args.help) {
     printHelp();
     Deno.exit(0);
+  }
+
+  if (inputFile) {
+    try {
+      globalThis._input = await loadInitialData();
+      globalThis._imports = {};
+
+      // -iオプション時はプレビューやシステムメッセージを抑制
+      const fileContent = await Deno.readTextFile(inputFile);
+      await evaluateCode(fileContent);
+      Deno.exit(0);
+    } catch (error) {
+      console.error(colors.bold(colors.red("--------------------------------------------------")));
+      console.error(colors.bold(colors.red(`Error during script execution (${inputFile}):`)));
+      if (error instanceof Deno.errors.NotFound) {
+        console.error(colors.red(`File not found: ${inputFile}`));
+      } else if (error instanceof Deno.errors.PermissionDenied) {
+        console.error(colors.red(`Permission denied when trying to read: ${inputFile}`));
+        console.error(colors.yellow("Hint: Ensure dx has --allow-read permissions for this file."));
+      } else if (error instanceof Error) {
+        // evaluateCode handles its own error printing.
+        // Only print additional info if the error is not from eval or is a very generic one.
+        const isLikelyEvalError = ["SyntaxError", "ReferenceError", "TypeError"].includes(error.name);
+        if (!isLikelyEvalError && error.stack && !error.stack.includes("eval")) {
+             console.error(colors.red(`${error.name}: ${error.message}`));
+        }
+        if (error.stack && !error.stack.includes("deno:core")) {
+             console.error(colors.gray(error.stack));
+        }
+      } else {
+        console.error(colors.red(`An unknown error occurred: ${error}`));
+      }
+      console.error(colors.bold(colors.red("--------------------------------------------------")));
+      Deno.exit(1);
+    }
   }
 
   // Module management commands
@@ -147,54 +202,6 @@ async function main() {
         Deno.exit(1);
     }
     Deno.exit(0); // Exit after module command is handled
-  }
-  if (args._.length > 0 && (args._[0] === "input" || args._[0] === "input" )) {
-    const inputFile = flags.input;
-    if (inputFile) {
-    try {
-      globalThis._input = await loadInitialData();
-      globalThis._imports = {};
-
-      if (globalThis._input !== null && globalThis._input !== undefined) {
-        console.log(colors.gray("Input data loaded into `globalThis._input` for script execution."));
-        if (typeof globalThis._input === 'string' && globalThis._input.length > 100) {
-            console.log(colors.gray(`Preview: ${colors.italic(globalThis._input.substring(0, 100) + "...")}`));
-        } else {
-            console.log(colors.gray("Preview:"), Deno.inspect(globalThis._input, {colors: true, depth: 1, strAbbreviateSize: 80}));
-        }
-      } else {
-        console.log(colors.gray("No piped data for `globalThis._input` for script execution."));
-      }
-
-      console.log(colors.blue(`Executing script from file: ${inputFile}`));
-      const fileContent = await Deno.readTextFile(inputFile);
-      await evaluateCode(fileContent);
-      Deno.exit(0);
-    } catch (error) {
-      console.error(colors.bold(colors.red("--------------------------------------------------")));
-      console.error(colors.bold(colors.red(`Error during script execution (${inputFile}):`)));
-      if (error instanceof Deno.errors.NotFound) {
-        console.error(colors.red(`File not found: ${inputFile}`));
-      } else if (error instanceof Deno.errors.PermissionDenied) {
-        console.error(colors.red(`Permission denied when trying to read: ${inputFile}`));
-        console.error(colors.yellow("Hint: Ensure dx has --allow-read permissions for this file."));
-      } else if (error instanceof Error) {
-        // evaluateCode handles its own error printing.
-        // Only print additional info if the error is not from eval or is a very generic one.
-        const isLikelyEvalError = ["SyntaxError", "ReferenceError", "TypeError"].includes(error.name);
-        if (!isLikelyEvalError && error.stack && !error.stack.includes("eval")) {
-             console.error(colors.red(`${error.name}: ${error.message}`));
-        }
-        if (error.stack && !error.stack.includes("deno:core")) {
-             console.error(colors.gray(error.stack));
-        }
-      } else {
-        console.error(colors.red(`An unknown error occurred: ${error}`));
-      }
-      console.error(colors.bold(colors.red("--------------------------------------------------")));
-      Deno.exit(1);
-    }
-  }
   }
 
   // Default REPL mode
