@@ -1,7 +1,6 @@
 // repl.ts
 import * as colors from "jsr:@std/fmt/colors";
 import { Input, type InputOptions } from "https://deno.land/x/cliffy@v1.0.0-rc.4/prompt/mod.ts";
-import { searchAndImportModule } from "./importer.ts";
 // import { readAll } from "jsr:@std/io/read-all"; // No longer needed here if main.ts handles it
 
 declare global {
@@ -47,13 +46,21 @@ How it works:
   persist after the block is executed.
 - For persistent variables across blocks, use 'var' or assign to 'globalThis'.
 
-Available commands (executed immediately):
+Module Management:
+  Modules can be managed from your command line using:
+    dx module add <name> <url>   - Add/overwrite a module.
+    dx module remove <name>      - Remove a module.
+    dx module list               - List currently mapped modules.
+  Mapped modules are automatically imported when the REPL starts.
+  If you added a module like 'foo' (e.g., from 'https://deno.land/std/path/mod.ts'),
+  you can use it directly in your code as 'foo'. For example: foo.join(...).
+
+Available REPL commands (executed immediately):
   .exit                Exit the REPL.
   .help                Show this help message.
   .run                 Execute the current code buffer.
   .do <filepath>       Execute a JavaScript file. Example: .do ./myscript.js
                        (File content is NOT added to buffer history)
-  .search <query>      Search and import modules. Example: .search path
   .clear               Clear the terminal screen.
   .context             Show current _input and _imports keys.
 
@@ -69,8 +76,9 @@ Buffer History Commands (for manually entered blocks):
   .bhclear             Clear all executed buffer history.
 
 Global objects:
-  globalThis._imports: Imported modules.
-  globalThis._input: Data piped from stdin (if provided by caller).
+  globalThis._input:   Data piped from stdin (if provided by caller).
+  globalThis._imports: Object holding auto-imported modules. You can inspect its
+                       keys to see what's available (e.g., using .context).
 `;
     outputToReplConsole(helpMessage);
   },
@@ -138,17 +146,6 @@ Global objects:
         for (const key in globalThis._imports) {
             outputToReplConsole(colors.green(`  ${key}:`) + (typeof globalThis._imports[key] === 'object' ? ' [Module]' : ` ${globalThis._imports[key]}`));
         }
-    }
-  },
-  ".search": async (query?: string) => {
-    if (!query || query.trim() === "") {
-      outputToReplConsole(colors.red("Usage: .search <query>"));
-      return;
-    }
-    const imported = await searchAndImportModule(query.trim());
-    if (imported) {
-      (globalThis._imports as Record<string, unknown>)[imported.name] = imported.module;
-      outputToReplConsole(colors.green(`Imported ${imported.url} as globalThis._imports.${imported.name}`));
     }
   },
   ".bclear": () => {
@@ -255,8 +252,19 @@ function outputToReplConsole(message: string) {
 
 async function evaluateCode(code: string): Promise<void> {
   if (code.trim() === "") return;
+
+  let importPrefix = "";
+  if (globalThis._imports && Object.keys(globalThis._imports).length > 0) {
+    const moduleNames = Object.keys(globalThis._imports);
+    // Make sure module names are valid variable names (simple check)
+    const validModuleNames = moduleNames.filter(name => /^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name));
+    if (validModuleNames.length > 0) {
+      importPrefix = `const { ${validModuleNames.join(", ")} } = globalThis._imports;\n`;
+    }
+  }
+
   try {
-    const finalCode = `"use strict"; ${code}`;
+    const finalCode = `"use strict";\n${importPrefix}${code}`;
     const result = await (async function() { return eval(finalCode); }).call(globalThis);
     if (result !== undefined) {
       console.log(Deno.inspect(result, { colors: true, depth: 4, strAbbreviateSize: 500 }));
