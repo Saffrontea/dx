@@ -318,8 +318,11 @@ export async function evaluateCode(code: string): Promise<void> {
   }
 
   try {
-    const finalCode = `"use strict";\n${importPrefix}${code}`;
-    const result = await (async function() { return eval(finalCode); }).call(globalThis);
+    const userCodeWithImports = `${importPrefix}${code}`;
+    const codeToEval = `(async () => { "use strict";
+${userCodeWithImports}
+})();`;
+    const result = await (async function() { return eval(codeToEval); }).call(globalThis);
     if (result !== undefined) {
       console.log(Deno.inspect(result, { colors: true, depth: 4, strAbbreviateSize: 500 }));
     }
