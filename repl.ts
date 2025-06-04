@@ -1,7 +1,7 @@
 // repl.ts
 import * as colors from "jsr:@std/fmt/colors";
 import { Input, type InputOptions } from "https://deno.land/x/cliffy@v1.0.0-rc.4/prompt/mod.ts";
-import { addModuleToMap, prepareSpecifierForImport, type DenoImportMap } from "./module_map.ts";
+import { addModuleToSessionMap, prepareSpecifierForImport, type DenoImportMap } from "./module_map.ts";
 // import { readAll } from "jsr:@std/io/read-all"; // No longer needed here if main.ts handles it
 
 declare global {
@@ -295,11 +295,11 @@ Module Resolution Note:
       }
       globalThis._imports[name] = module;
 
-      // Add using the original specifierString, as addModuleToMap will also call prepareSpecifierForImport
-      await addModuleToMap({ name, specifier: specifierString }, globalThis._activeImportMap);
+      // セッション用マップに追加（永続化しない）
+      await addModuleToSessionMap({ name, specifier: specifierString }, globalThis._activeImportMap);
 
-      outputToReplConsole(colors.green(`Module '${name}' (from original specifier '${specifierString}', resolved to '${preparedSpecifier}') imported and map entry updated.`));
-      outputToReplConsole(colors.gray(`You can now use '${name}' in your code.`));
+      outputToReplConsole(colors.green(`Module '${name}' (from original specifier '${specifierString}', resolved to '${preparedSpecifier}') imported for this session.`));
+      outputToReplConsole(colors.gray(`You can now use '${name}' in your code. This module will not persist after the REPL session ends.`));
 
     } catch (error) {
       outputToReplConsole(colors.red(`Error processing module '${name}' with specifier '${specifierString}':`));
