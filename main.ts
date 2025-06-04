@@ -269,9 +269,9 @@ Options:
                            script's globalThis._input variable.
   --import-map <filepath>  Load a custom import map from the specified JSON file.
                            This map is used to resolve module specifiers for
-                           `module add` and REPL's `.import` commands. If not
-                           provided, `dx` will look for a `deno.json` or
-                           `deno.jsonc` in the current directory.
+                           module add and REPL's .import commands. If not
+                           provided, dx will look for a deno.json or
+                           deno.jsonc in the current directory.
 `);
 }
 

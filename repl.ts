@@ -91,17 +91,17 @@ Global objects:
                        keys to see what's available (e.g., using .context).
 
 Module Resolution Note:
-  Module specifiers for `.import` and `dx module add` (from CLI) can be resolved
-  using an import map. This map can be provided via the `--import-map` CLI flag
-  or automatically detected from a `deno.json` or `deno.jsonc` file in the
-  directory where `dx` was launched.
+  Module specifiers for .import and dx module add (from CLI) can be resolved
+  using an import map. This map can be provided via the --import-map CLI flag
+  or automatically detected from a deno.json or deno.jsonc file in the
+  directory where dx was launched.
 
   Standard import statements within your REPL code (e.g., import foo from "bar";)
-  are handled directly by Deno's runtime. If `dx` itself was launched with Deno's
+  are handled directly by Deno's runtime. If dx itself was launched with Deno's
   native --import-map flag (e.g., deno run --import-map=my_deno_map.json main.ts),
-  Deno's runtime will use that for such import statements. The `dx` managed map
-  (via --import-map or deno.json/c) is primarily for the `.import` command and
-  `dx module add` convenience.
+  Deno's runtime will use that for such import statements. The dx managed map
+  (via --import-map or deno.json/c) is primarily for the .import command and
+  dx module add convenience.
 `;
     outputToReplConsole(helpMessage);
   },
