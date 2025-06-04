@@ -131,7 +131,6 @@ Module Resolution Note:
     try {
       outputToReplConsole(colors.italic(colors.dim(`Executing file: ${trimmedFilepath}...`)));
       const fileContent = await Deno.readTextFile(trimmedFilepath);
-      
       // .do で実行されたファイルの内容はバッファ履歴には追加しない
       // codeBuffer = []; // Current live buffer is cleared before executing file content
       // bufferHistoryPointer = -1; // Exit any history view
