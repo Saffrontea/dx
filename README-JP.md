@@ -81,11 +81,15 @@ Options:
   -i, --input <filename>   Execute a JavaScript file, print its stdout, then exit.
                            Any data piped to dx via stdin will be available in the
                            script's globalThis._input variable.
-  --import-map <filepath>  Load a custom import map from the specified JSON file.
-                           This map is used to resolve module specifiers for
-                           module add and REPL's .import commands. If not
-                           provided, dx will look for a deno.json or
-                           deno.jsonc in the current directory.
+  -c, --code <string>      指定されたJavaScript文字列を実行します。
+                           コマンド自体のメッセージ出力（読み込み確認など）は抑制されます。
+                           インポートマップ（--import-mapまたはdeno.json/deno.jsonc経由）を尊重します。
+                           標準入力経由でデータが渡された場合、globalThis._inputで利用可能です。
+  --import-map <filepath>  指定されたJSONファイルからカスタムインポートマップを読み込みます。
+                           このマップは`module add`およびREPLの`.import`コマンドの
+                           モジュール指定子を解決するために使用されます。このオプションが
+                           指定されていない場合、`dx`はカレントディレクトリにある
+                           `deno.json`または`deno.jsonc`を自動的に探します。
 ```
 
 ### jqとの比較
@@ -130,52 +134,14 @@ cat data.json | dx
 
 ## 実用例
 
-### 気象データ処理
+このリポジトリには、`dx` の実用的な使用例を示す専用の `examples/` ディレクトリが含まれています。各例には、それぞれの入力データ、ソーススクリプト、および実行方法と動作を説明するREADMEが付属しています。
 
-```javascript
-// APIから気象データを処理
-const apiKey = globalThis._input.apiKey;
-const city = "Tokyo";
+現在利用可能な例：
 
-const response = await fetch(`https://api.example.com/weather?city=${city}&apiKey=${apiKey}`);
-const data = await response.json();
+*   **`examples/json-manipulation/`**: フィルタリングやマッピングなど、一般的なJSON変換のデモンストレーション。
+*   **`examples/text-processing/`**: ログ内の単語の出現回数を数えるなど、テキストデータの行ごとの処理方法の表示。
 
-// 予報を抽出して変換
-const forecast = data.forecast.map(item => ({
-  date: item.date,
-  condition: item.condition,
-  temperature: {
-    high: item.tempHigh,
-    low: item.tempLow
-  }
-}));
-
-console.log(JSON.stringify(forecast));
-```
-
-### バッチファイル処理
-
-```javascript
-// _inputにファイルリストが含まれていると仮定
-const files = globalThis._input;
-const results = [];
-
-for (const file of files) {
-  const content = await Deno.readTextFile(file);
-  const stats = content.split('\n').reduce((acc, line) => {
-    if (line.includes('ERROR')) acc.errors++;
-    if (line.includes('WARNING')) acc.warnings++;
-    return acc;
-  }, { errors: 0, warnings: 0 });
-
-  results.push({
-    file,
-    stats
-  });
-}
-
-console.log(JSON.stringify(results));
-```
+これらの例を調べて、さまざまなデータ処理タスクを解決するために `dx` をどのように使用できるかについての理解を深めることをお勧めします。
 
 ## ライセンス
 
