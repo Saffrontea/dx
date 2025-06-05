@@ -81,15 +81,15 @@ Options:
   -i, --input <filename>   Execute a JavaScript file, print its stdout, then exit.
                            Any data piped to dx via stdin will be available in the
                            script's globalThis._input variable.
-  -c, --code <string>      指定されたJavaScript文字列を実行します。
-                           コマンド自体のメッセージ出力（読み込み確認など）は抑制されます。
-                           インポートマップ（--import-mapまたはdeno.json/deno.jsonc経由）を尊重します。
-                           標準入力経由でデータが渡された場合、globalThis._inputで利用可能です。
-  --import-map <filepath>  指定されたJSONファイルからカスタムインポートマップを読み込みます。
-                           このマップは`module add`およびREPLの`.import`コマンドの
-                           モジュール指定子を解決するために使用されます。このオプションが
-                           指定されていない場合、`dx`はカレントディレクトリにある
-                           `deno.json`または`deno.jsonc`を自動的に探します。
+  -c, --code <string>      Execute the provided JavaScript string.
+                           Command messages (like loading confirmations) are suppressed.
+                           Respects import maps (via --import-map or deno.json/deno.jsonc).
+                           If data is piped via stdin, it's available in globalThis._input.
+  --import-map <filepath>  Load a custom import map from the specified JSON file.
+                           This map is used to resolve module specifiers for `module add`
+                           and REPL's `.import` commands. `dx` also automatically
+                           looks for `deno.json` or `deno.jsonc` in the current
+                           directory if this option is not provided.
 ```
 
 ### jqとの比較
