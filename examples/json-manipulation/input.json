@@ -1,0 +1,32 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Alice Johnson",
+      "email": "alice.johnson@example.com",
+      "isActive": true,
+      "age": 28
+    },
+    {
+      "id": 2,
+      "name": "Bob Smith",
+      "email": "bob.smith@example.com",
+      "isActive": false,
+      "age": 35
+    },
+    {
+      "id": 3,
+      "name": "Carol White",
+      "email": "carol.white@example.com",
+      "isActive": false,
+      "age": 22
+    },
+    {
+      "id": 4,
+      "name": "David Brown",
+      "email": "david.brown@example.com",
+      "isActive": true,
+      "age": 42
+    }
+  ]
+}

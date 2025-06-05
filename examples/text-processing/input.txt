@@ -1,0 +1,9 @@
+INFO: Application started successfully.
+DEBUG: User authentication request received.
+ERROR: Failed to connect to database. Retrying...
+INFO: User 'admin' logged in.
+WARNING: Disk space is running low.
+ERROR: Payment processing failed for transaction 12345.
+DEBUG: Data validation complete.
+ERROR: Null pointer exception at module X, line Y.
+INFO: Shutting down application.

@@ -81,11 +81,15 @@ Options:
   -i, --input <filename>   Execute a JavaScript file, print its stdout, then exit.
                            Any data piped to dx via stdin will be available in the
                            script's globalThis._input variable.
+  -c, --code <string>      Execute the provided JavaScript string.
+                           Command messages (like loading confirmations) are suppressed.
+                           Respects import maps (via --import-map or deno.json/deno.jsonc).
+                           If data is piped via stdin, it's available in globalThis._input.
   --import-map <filepath>  Load a custom import map from the specified JSON file.
-                           This map is used to resolve module specifiers for
-                           module add and REPL's .import commands. If not
-                           provided, dx will look for a deno.json or
-                           deno.jsonc in the current directory.
+                           This map is used to resolve module specifiers for `module add`
+                           and REPL's `.import` commands. `dx` also automatically
+                           looks for `deno.json` or `deno.jsonc` in the current
+                           directory if this option is not provided.
 ```
 
 ### Comparison with jq
@@ -130,52 +134,14 @@ When using the interactive REPL, several commands are available:
 
 ## Real-world Examples
 
-### Weather Data Processing
+This repository includes a dedicated `examples/` directory showcasing practical use cases for `dx`. Each example comes with its own input data, source script, and a README explaining how to run it and what it does.
 
-```javascript
-// Process weather data from an API
-const apiKey = globalThis._input.apiKey;
-const city = "Tokyo";
+Currently available examples:
 
-const response = await fetch(`https://api.example.com/weather?city=${city}&apiKey=${apiKey}`);
-const data = await response.json();
+*   **`examples/json-manipulation/`**: Demonstrates common JSON transformations like filtering and mapping.
+*   **`examples/text-processing/`**: Shows how to perform line-by-line processing of text data, such as counting word occurrences in logs.
 
-// Extract and transform the forecast
-const forecast = data.forecast.map(item => ({
-  date: item.date,
-  condition: item.condition,
-  temperature: {
-    high: item.tempHigh,
-    low: item.tempLow
-  }
-}));
-
-console.log(JSON.stringify(forecast));
-```
-
-### Batch File Processing
-
-```javascript
-// Assuming _input contains a list of files
-const files = globalThis._input;
-const results = [];
-
-for (const file of files) {
-  const content = await Deno.readTextFile(file);
-  const stats = content.split('\n').reduce((acc, line) => {
-    if (line.includes('ERROR')) acc.errors++;
-    if (line.includes('WARNING')) acc.warnings++;
-    return acc;
-  }, { errors: 0, warnings: 0 });
-
-  results.push({
-    file,
-    stats
-  });
-}
-
-console.log(JSON.stringify(results));
-```
+We encourage you to explore these examples to get a better understanding of how `dx` can be used to solve various data processing tasks.
 
 ## License
 
