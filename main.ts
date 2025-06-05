@@ -27,10 +27,11 @@ async function main() {
   const args = parseArgs(Deno.args, {
     alias: {
       'h': "help",
-      'i': 'input'
+      'i': 'input',
+      c: "code"
     },
     boolean: ["help"],
-    string: ["i", "input", "module", "import-map"],
+    string: ["i", "input", "module", "import-map", "c", "code"],
     collect: ["module"], // Allows --module add name url, --module remove name etc.
                         // This is a bit of a workaround for subcommands with parseArgs.
                         // A more robust CLI parser might be better for complex subcommands.
@@ -43,6 +44,8 @@ async function main() {
   // Check for -i/--input option first
   const inputFile = args.input || args.i;
   const isInputMode = !!inputFile;
+  const codeOption = args.code || args.c;
+  const isCodeMode = !!codeOption;
 
   if (importMapPathArg) {
     try {
@@ -51,21 +54,21 @@ async function main() {
         const parsedMap = JSON.parse(fileContent);
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
-          if (!isInputMode) {
+          if (!isInputMode && !isCodeMode) {
             console.log(colors.dim(`Using import map from: ${importMapPathArg}`));
           }
         } else {
-          if (!isInputMode) {
+          if (!isInputMode && !isCodeMode) {
             console.warn(colors.yellow(`Warning: Import map file ${importMapPathArg} does not have a valid 'imports' property. Proceeding without an import map.`));
           }
         }
       } else {
-        if (!isInputMode) {
+        if (!isInputMode && !isCodeMode) {
           console.warn(colors.yellow(`Warning: Import map file not found at ${importMapPathArg}. Proceeding without an import map.`));
         }
       }
     } catch (error) {
-      if (!isInputMode) {
+      if (!isInputMode && !isCodeMode) {
         console.warn(colors.yellow(`Warning: Error reading or parsing import map from ${importMapPathArg}: ${error.message}. Proceeding without an import map.`));
       }
     }
@@ -82,12 +85,12 @@ async function main() {
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
           foundDefaultImportMap = true;
-          if (!isInputMode) {
+          if (!isInputMode && !isCodeMode) {
             console.log(colors.dim("Using import map from: deno.json"));
           }
         }
       } catch (error) {
-        if (!isInputMode) {
+        if (!isInputMode && !isCodeMode) {
           console.warn(colors.yellow(`Warning: Error reading or parsing deno.json: ${error.message}.`));
         }
       }
@@ -101,12 +104,12 @@ async function main() {
         const parsedMap = JSON.parse(jsonContent);
         if (parsedMap && typeof parsedMap.imports === "object") {
           activeImportMap = { imports: parsedMap.imports };
-          if (!isInputMode) {
+          if (!isInputMode && !isCodeMode) {
             console.log(colors.dim("Using import map from: deno.jsonc"));
           }
         }
       } catch (error) {
-        if (!isInputMode) {
+        if (!isInputMode && !isCodeMode) {
           console.warn(colors.yellow(`Warning: Error reading or parsing deno.jsonc: ${error.message}.`));
         }
       }
@@ -120,7 +123,41 @@ async function main() {
     Deno.exit(0);
   }
 
-  if (inputFile) {
+  if (isCodeMode) {
+    try {
+      // globalThis._input and _imports are needed by evaluateCode
+      globalThis._input = await loadInitialData();
+      globalThis._imports = {}; // Initialize, though not used for auto-imports here
+      globalThis._activeImportMap = activeImportMap; // Make import map available
+
+      // Verbose CLI messages are suppressed because isCodeMode is true
+      // (This will be handled in the next plan step by adjusting message printing conditions)
+      // For now, focus on the execution logic.
+
+      const codeToExecute = codeOption as string; // Already checked it's a string by parseArgs
+      await evaluateCode(codeToExecute);
+      Deno.exit(0);
+    } catch (error) {
+      // Error logging similar to the -i option
+      console.error(colors.bold(colors.red("--------------------------------------------------")));
+      console.error(colors.bold(colors.red("Error during code execution (-c):")));
+      if (error instanceof Error) {
+        const isLikelyEvalError = ["SyntaxError", "ReferenceError", "TypeError"].includes(error.name);
+        if (!isLikelyEvalError && error.stack && !error.stack.includes("eval")) {
+             console.error(colors.red(`${error.name}: ${error.message}`));
+        }
+        if (error.stack && !error.stack.includes("deno:core")) { // Avoid overly verbose Deno internal stack
+             console.error(colors.gray(error.stack));
+        }
+      } else {
+        console.error(colors.red(`An unknown error occurred: ${error}`));
+      }
+      console.error(colors.bold(colors.red("--------------------------------------------------")));
+      Deno.exit(1);
+    }
+  }
+
+  if (!isCodeMode && inputFile) {
     try {
       globalThis._input = await loadInitialData();
       globalThis._imports = {};
@@ -206,11 +243,12 @@ async function main() {
 
   // Default REPL mode
 
-  // グローバルスコープにREPL用の変数を設定
-  globalThis._input = await loadInitialData();
-  globalThis._imports = {};
+  if (!isInputMode && !isCodeMode) {
+    // グローバルスコープにREPL用の変数を設定
+    globalThis._input = await loadInitialData();
+    globalThis._imports = {};
 
-  // Load modules from map and make them available in globalThis._imports
+    // Load modules from map and make them available in globalThis._imports
   const moduleMap = await loadModuleMap();
   if (Object.keys(moduleMap).length > 0) {
     console.log(colors.italic(colors.dim("Loading modules from map...")));
@@ -238,9 +276,10 @@ async function main() {
       console.log(colors.gray("Preview:"), Deno.inspect(globalThis._input, {colors: true, depth: 1, strAbbreviateSize: 80}));
     }
   }
-  console.log(colors.yellow("Starting REPL. Type .help for commands, or JavaScript code to evaluate."));
+    console.log(colors.yellow("Starting REPL. Type .help for commands, or JavaScript code to evaluate."));
 
-  await startRepl();
+    await startRepl();
+  }
 }
 
 function printHelp() {
@@ -274,6 +313,10 @@ Options:
   -i, --input <filename>   Execute a JavaScript file, print its stdout, then exit.
                            Any data piped to dx via stdin will be available in the
                            script's globalThis._input variable.
+  -c, --code <string>    Execute the provided JavaScript string.
+                             Message output from the command itself is suppressed.
+                             Respects import maps (via --import-map or deno.json/c).
+                             If data is piped via stdin, it's available in globalThis._input.
   --import-map <filepath>  Load a custom import map from the specified JSON file.
                            This map is used to resolve module specifiers for
                            module add and REPL's .import commands. If not
