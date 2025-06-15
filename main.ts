@@ -10,7 +10,6 @@ import {
   removeModuleFromMap,
   listModulesInMap,
   loadModuleMap, // Added import
-  type ModuleMapEntry,
   type DenoImportMap,
 } from "./module_map.ts";
 // REPLからアクセス可能にするグローバル変数
@@ -21,6 +20,24 @@ declare global {
   var _imports: Record<string, unknown>;
   // deno-lint-ignore no-var
   var _activeImportMap: DenoImportMap | undefined;
+}
+
+// Helper function to load module map into global imports
+async function loadModuleMapToGlobal() {
+  const moduleMap = await loadModuleMap();
+  globalThis._imports = {};
+  
+  if (Object.keys(moduleMap).length > 0) {
+    for (const [name, entry] of Object.entries(moduleMap)) {
+      try {
+        globalThis._imports[name] = await import(entry.url);
+      } catch (error) {
+        // Silently fail for -i and -c modes, but log for REPL mode
+        // This will be handled by the caller
+        console.error(colors.red(`Error loading module "${name}" from ${entry.url}:`), error.message);
+      }
+    }
+  }
 }
 
 async function main() {
@@ -127,12 +144,10 @@ async function main() {
     try {
       // globalThis._input and _imports are needed by evaluateCode
       globalThis._input = await loadInitialData();
-      globalThis._imports = {}; // Initialize, though not used for auto-imports here
       globalThis._activeImportMap = activeImportMap; // Make import map available
 
-      // Verbose CLI messages are suppressed because isCodeMode is true
-      // (This will be handled in the next plan step by adjusting message printing conditions)
-      // For now, focus on the execution logic.
+      // Load modules from map and make them available in globalThis._imports
+      await loadModuleMapToGlobal();
 
       const codeToExecute = codeOption as string; // Already checked it's a string by parseArgs
       await evaluateCode(codeToExecute);
@@ -160,7 +175,10 @@ async function main() {
   if (!isCodeMode && inputFile) {
     try {
       globalThis._input = await loadInitialData();
-      globalThis._imports = {};
+      globalThis._activeImportMap = activeImportMap; // Make import map available
+
+      // Load modules from map and make them available in globalThis._imports
+      await loadModuleMapToGlobal();
 
       // -iオプション時はプレビューやシステムメッセージを抑制
       const fileContent = await Deno.readTextFile(inputFile);
@@ -246,36 +264,36 @@ async function main() {
   if (!isInputMode && !isCodeMode) {
     // グローバルスコープにREPL用の変数を設定
     globalThis._input = await loadInitialData();
-    globalThis._imports = {};
+    globalThis._activeImportMap = activeImportMap; // Make import map available to REPL
 
     // Load modules from map and make them available in globalThis._imports
-  const moduleMap = await loadModuleMap();
-  if (Object.keys(moduleMap).length > 0) {
-    console.log(colors.italic(colors.dim("Loading modules from map...")));
-    for (const [name, entry] of Object.entries(moduleMap)) {
-      try {
-        globalThis._imports[name] = await import(entry.url);
-        console.log(colors.dim(`  Loaded "${name}" from ${entry.url}`));
-      } catch (error) {
-        console.error(colors.red(`  Error loading module "${name}" from ${entry.url}:`), error.message);
+    const moduleMap = await loadModuleMap();
+    globalThis._imports = {};
+    
+    if (Object.keys(moduleMap).length > 0) {
+      console.log(colors.italic(colors.dim("Loading modules from map...")));
+      for (const [name, entry] of Object.entries(moduleMap)) {
+        try {
+          globalThis._imports[name] = await import(entry.url);
+          console.log(colors.dim(`  Loaded "${name}" from ${entry.url}`));
+        } catch (error) {
+          console.error(colors.red(`  Error loading module "${name}" from ${entry.url}:`), error.message);
+        }
       }
     }
-  }
 
-  // Deno や console など、よく使うものをグローバルに明示的に配置 (通常は不要だがREPLでは便利)
-  // globalThis.Deno = Deno; // Deno は元々グローバル
-  // globalThis.console = console; // console も元々グローバル
+    // Deno や console など、よく使うものをグローバルに明示的に配置 (通常は不要だがREPLでは便利)
+    // globalThis.Deno = Deno; // Deno は元々グローバル
+    // globalThis.console = console; // console も元々グローバル
 
-  globalThis._activeImportMap = activeImportMap; // Make import map available to REPL
-
-  if (globalThis._input !== null) {
-    console.log(colors.gray("Input data loaded into `globalThis._input`."));
-    if (typeof globalThis._input === 'string' && globalThis._input.length > 200) {
-      console.log(colors.gray(`Preview: ${colors.italic(globalThis._input.substring(0, 200) + "...")}`));
-    } else {
-      console.log(colors.gray("Preview:"), Deno.inspect(globalThis._input, {colors: true, depth: 1, strAbbreviateSize: 80}));
+    if (globalThis._input !== null) {
+      console.log(colors.gray("Input data loaded into `globalThis._input`."));
+      if (typeof globalThis._input === 'string' && globalThis._input.length > 200) {
+        console.log(colors.gray(`Preview: ${colors.italic(globalThis._input.substring(0, 200) + "...")}`));
+      } else {
+        console.log(colors.gray("Preview:"), Deno.inspect(globalThis._input, {colors: true, depth: 1, strAbbreviateSize: 80}));
+      }
     }
-  }
     console.log(colors.yellow("Starting REPL. Type .help for commands, or JavaScript code to evaluate."));
 
     await startRepl();
